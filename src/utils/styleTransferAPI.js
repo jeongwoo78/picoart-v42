@@ -73,19 +73,30 @@ const callFluxAPI = async (photoBase64, stylePrompt, onProgress) => {
 const callFluxWithAI = async (photoBase64, selectedStyle, onProgress) => {
   if (onProgress) onProgress('AI 자동 화가 선택 시작...');
 
-  const response = await fetch('/api/flux-transfer', {
+  // v43: SDXL Lightning 사용 옵션 추가
+  const useSDXL = true; // SDXL Lightning 기본 사용 (빠르고 저렴)
+  const endpoint = useSDXL ? '/api/flux-transfer-sdxl' : '/api/flux-transfer';
+  
+  if (useSDXL) {
+    console.log('⚡ Using SDXL Lightning - 72% cheaper, 2.5x faster');
+  }
+
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
       image: photoBase64,
-      selectedStyle: selectedStyle
+      selectedStyle: selectedStyle,
+      style: selectedStyle,  // 두 가지 형식 모두 지원
+      prompt: selectedStyle.prompt || selectedStyle.description,
+      useSDXL: useSDXL
     })
   });
 
   if (!response.ok) {
-    throw new Error(`FLUX API error: ${response.status}`);
+    throw new Error(`API error: ${response.status}`);
   }
 
   return response.json();
