@@ -17,6 +17,7 @@ const {
 
 const styleGuides = require('./services/styleGuides.js');
 const orientalArt = require('./services/orientalArt.js');
+const { rateLimiter } = require('./services/rateLimiter.js');
 
 // ========================================
 // 메인 핸들러
@@ -145,41 +146,53 @@ function getStyleGuidelines(style) {
   return guideFunction ? guideFunction() : '';
 }
 
-// Replicate API 호출
+// Replicate API 호출 (Rate Limiting 적용)
 async function callReplicateAPI(image, prompt, controlStrength) {
-  const response = await fetch(
-    'https://api.replicate.com/v1/models/black-forest-labs/flux-depth-dev/predictions',
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Token ${process.env.REPLICATE_API_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'wait'
-      },
-      body: JSON.stringify({
-        input: {
-          control_image: image,
-          prompt: prompt,
-          num_inference_steps: 24,
-          guidance: 12,
-          control_strength: controlStrength,
-          output_format: 'jpg',
-          output_quality: 90
-        }
-      })
+  return rateLimiter.addToQueue(async () => {
+    const response = await fetch(
+      'https://api.replicate.com/v1/models/black-forest-labs/flux-depth-dev/predictions',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Token ${process.env.REPLICATE_API_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'wait'
+        },
+        body: JSON.stringify({
+          input: {
+            control_image: image,
+            prompt: prompt,
+            num_inference_steps: 24,
+            guidance: 12,
+            control_strength: controlStrength,
+            output_format: 'jpg',
+            output_quality: 90
+          }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('FLUX Depth error:', response.status, errorText);
+      
+      // 429 에러를 위한 특별 처리
+      if (response.status === 429) {
+        const errorData = JSON.parse(errorText);
+        const error = new Error(errorData.detail || 'Rate limited');
+        error.status = 429;
+        error.retry_after = errorData.retry_after || 10;
+        throw error;
+      }
+      
+      throw new Error(`FLUX API error: ${response.status}`);
     }
-  );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('FLUX Depth error:', response.status, errorText);
-    throw new Error(`FLUX API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  console.log('✅ FLUX Depth completed');
-  
-  return data;
+    const data = await response.json();
+    console.log('✅ FLUX Depth completed');
+    
+    return data;
+  });
 }
 
 // ========================================
